@@ -9,7 +9,23 @@ from time import time
 from sys import exit, argv
 
 
-class progress_bar:
+class Colour:
+    """ Colour text in console. From https://stackoverflow.com/questions/6537487/changing-shell-text-color-windows """
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+# allows text to be colours using ANSI codes (for some reason), comment from ^
+os.system('color')
+
+
+class ProgressBar:
     def __init__(self, total_size, length=20):
         self.total_size = total_size
         self.current_size = 0
@@ -24,21 +40,22 @@ class progress_bar:
         percentage = round(float(self.current_size) / self.total_size * self.length)
         filled = "█" * percentage
         empty = " " * (self.length - percentage)
-        percentage *= 100 / self.length
+        percentage *= 100.0 / self.length
         file_name = file_name.replace("\n", "")
         if len(file_name) > 50: file_name = file_name[:50] + "..."
 
-        print(f"[{filled}{empty}] {round(percentage,1)}%\t{file_name}{' ' * len(self.prev_file_name)}", end="\r")
+        print(f"[{filled}{empty}] {round(percentage, 1)}%\t{file_name}{' ' * max(0, 50 - len(self.prev_file_name))}", end="\r")
 
         self.prev_file_name = file_name
 
     def complete(self):
         """ Show completed bar """
-        print(f"[{'█' * self.length}] 100%\tComplete!{' ' * len(self.prev_file_name)}")
+        print(f"[{'█' * self.length}] 100%  Complete!{' ' * len(self.prev_file_name)}")
         del self
 
 
 def parse_args():
+    """ Parse command line arguments """
     # show help
     if '-h' in argv or "--help" in argv:
         arg_functions.show_help()
@@ -84,25 +101,10 @@ def parse_args():
         exit()
 
 
-def get_backup_locations():
+def get_paths(filename):
+    """ Read file to get paths """
     try:
-        locations_file = open("backupLocations.txt", "r")
-
-        locations = locations_file.read().split("\n")
-        locations.remove("")
-        if len(locations) == 0: raise FileNotFoundError
-
-        locations_file.close()
-        return locations
-
-    except FileNotFoundError:
-        print("No backup locations found! Add some using -addlocation PATH")
-        exit()
-
-
-def get_paths():
-    try:
-        paths_file = open("backupPaths.txt", "r")
+        paths_file = open(filename, "r")
 
         paths = paths_file.read().split("\n")
         paths.remove("")
@@ -112,7 +114,8 @@ def get_paths():
         return paths
 
     except FileNotFoundError:
-        print("No paths found! Add some using -addpath PATH")
+        command = "-addpath" if filename == "backupPaths.txt" else "-addlocation"
+        print(f"No paths found! Add some using {command} PATH")
         exit()
 
 
@@ -128,34 +131,123 @@ def onerror(func, path, exc):
         raise
 
 
-def get_backup_size(path=None):
-    if path:
-        sources = [path]
+def compare_prev_version(prev, current):
+    """ Compare the previous backup with the current to see if there are any deleted files that may want to be kept """
+
+    def get_files(root, sub_dir=None):
+        """ Get path to each file from root """
+        files = set()
+
+        for path in os.listdir(root):
+            full_path = os.path.join(root, path)
+            if sub_dir: path = os.path.join(sub_dir, path)
+
+            # get files from subdirectory
+            if os.path.isdir(full_path):
+                files.update(get_files(full_path, sub_dir=path))
+
+            elif os.path.isfile(full_path):
+                files.add(path)
+
+        return files
+
+    def copy(file):
+        """ Copy file from prev to current """
+        source = os.path.join(prev, file)
+        dest = os.path.join(current, os.path.dirname(file))
+
+        if not os.path.exists(dest):
+            os.makedirs(dest)
+
+        try:
+            shutil.copy(source, dest)
+        except PermissionError as e:
+            source.replace('\\\\', '\\')
+            return f"{Colour.FAIL}Unable to copy file! > {source}{Colour.ENDC}"
+
+    prev_files = get_files(prev)
+    current_files = get_files(current)
+
+    if prev_files.issubset(current_files):
+        return
     else:
-        sources = get_paths()
-    backup_size = 0
+        missing = list(prev_files.difference(current_files))
 
-    for source in sources:
-        for root, dirs, files in os.walk(source):
-            for file in files:
-                file_path = os.path.join(root, file)
-                if not os.path.islink(file_path):
-                    backup_size += os.path.getsize(file_path)
+    print(f"{Colour.WARNING}There are {Colour.FAIL}{len(missing)}{Colour.WARNING} files in the previous backup that "
+          f"are no longer in the current one!{Colour.ENDC}")
 
-    return backup_size
+    if input("View files (Y) or ignore(n)? >>> ").lower() in ["y", ""]:
+        print()
+        for file in missing:
+            print(file)
+        print()
+
+        choice = None
+        while choice not in ["a", "n", "c"]:
+            choice = input("Keep all(a) | Ignore all(n) | Choose individually(c) >>> ")
+            if choice.lower() not in ["a", "n", "c"]:
+                print(f"{Colour.WARNING}Invalid input! please enter a, n or c{Colour.ENDC}")
+
+        print()
+
+        failed_files = []
+
+        if choice == "a":
+            for file in missing:
+                fail = copy(file)
+                if fail: failed_files.append(fail)
+
+        if choice == "c":
+
+            for file in missing:
+                print(file)
+                choice = input("Keep (Enter) | Discard (n) >>> ")
+                if choice.lower() != "n":
+                    fail = copy(file)
+                    if fail: failed_files.append(fail)
+
+        if failed_files:
+            for file in failed_files:
+                print(file)
+
+
+def get_size(path):
+    total_size = 0
+
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if not os.path.islink(file_path):
+                total_size += os.path.getsize(file_path)
+
+    return total_size
 
 
 def backup():
-    sources = get_paths()
-    locations = get_backup_locations()
+    sources = get_paths("backupPaths.txt")
+    locations = get_paths("backupLocations.txt")
     create_time = datetime.now().strftime("%d%b%y_%H%M")
-    total_size = get_backup_size()
     keep_versions = 2
 
-    for location in locations:
-        print(f"Backing up to {location}\n")
-        bar = progress_bar(total_size, 30)
+    # get total size of all files
+    print(f"{Colour.HEADER}Calculating size...{Colour.ENDC}")
+    total_size = 0
+    for source in sources:
+        total_size += get_size(source)
 
+    # backup to each location
+    for location in locations:
+        print(f"{Colour.OKBLUE}Backing up to {location}{Colour.ENDC}\n")
+        bar = ProgressBar(total_size)
+        prev_version = None
+
+        # Find most recent backup in location
+        for version in os.listdir(location):
+            path = os.path.join(location, version)
+            if prev_version is None or os.stat(path).st_ctime > os.stat(prev_version).st_ctime:
+                prev_version = path
+
+        # Copy files
         for source in sources:
             for root, dirs, files in os.walk(source):
                 if not os.path.exists(f"{location}\\{create_time}{root[2:]}"):
@@ -169,6 +261,7 @@ def backup():
                     bar.update(os.path.getsize(file_path), file_path)
 
         bar.complete()
+        if prev_version: compare_prev_version(prev_version, f"{location}\\{create_time}")
 
         # remove old versions
         while len(os.listdir(location)) > keep_versions:
@@ -181,40 +274,31 @@ def backup():
                 if oldest_version is None or os.stat(oldest_version).st_ctime > create_date:
                     oldest_version = path
 
-            print(
-                f"Version limit reached! ({len(os.listdir(location))}/{keep_versions}) Removing old version {oldest_version}\n")
+            version_count = len(os.listdir(location))
+            print(f"{Colour.WARNING}Version limit reached! {Colour.FAIL}({version_count}/{keep_versions}){Colour.WARNING} Removing old version {oldest_version}{Colour.ENDC}\n")
             shutil.rmtree(oldest_version, ignore_errors=False, onerror=onerror)
 
-    return total_size
+        # calculate & display size of backup
+        backup_size = round(get_size(f"{location}\\{create_time}") / 1000000.0, 2)
+        size = round(backup_size / 1000.0, 2) if backup_size > 1000 else backup_size
+        units = 'Mb' if backup_size <= 1000 else 'Gb'
+        print(f"{Colour.OKGREEN}Backup size: {Colour.ENDC} {size} {units}")
 
 
 if __name__ == '__main__':
-    try:
-        backup_locations_file = open("backupLocations.txt", "x")
-        backup_locations_file.close()
-    except FileExistsError:
-        pass
-
-    try:
-        backup_paths_file = open("backupPaths.txt", "x")
-        backup_paths_file.close()
-    except FileExistsError:
-        pass
+    for file in ["backupLocations.txt", "backupPaths.txt"]:
+        if not os.path.exists(file):
+            path_file = open(file, "x")
+            path_file.close()
 
     parse_args()
 
-    print("Starting backup\n")
     start_time = time()
-    backup_size, failed_dirs = backup()
-    backup_size = round(backup_size / 1000000.0, 2)
+    backup()
 
-    minutes = f"{math.floor((time() - start_time) / 60.0)} {'minute' if int(time() - start_time) / 60 == 1 else 'minutes'}"
-    print(f"Backup complete! took {minutes if time() - start_time >= 60 else ''} {int(time() - start_time) % 60} seconds")
-    print(f"Backup size = {round(backup_size / 1000.0, 2) if backup_size > 1000 else backup_size} {'Mb' if backup_size <= 1000 else 'Gb'}")
-
-    if failed_dirs:
-        print("Unable to copy these directories")
-        for path in failed_dirs:
-            print(path)
-
-    #  TODO: folders that were in previous backup but not in current
+    total_time = time() - start_time
+    mins = math.floor(total_time / 60)
+    mins = "" if mins == 0 else "1 minute " if mins == 1 else f"{mins} minutes "
+    seconds = int(total_time) % 60
+    seconds = "1 second" if seconds == 1 else f"{seconds} seconds"
+    print(f"{Colour.OKGREEN}Backup complete!{Colour.ENDC} took {mins}{seconds}")
