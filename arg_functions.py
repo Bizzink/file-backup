@@ -24,7 +24,16 @@ def show_help():
     """)
 
 
+def ensure_exists(file):
+    """ If the file does not exist, create it """
+    if not os.path.exists(file):
+        path_file = open(file, "x")
+        path_file.close()
+
+
 def add_path(path):
+    ensure_exists("backupPaths.txt")
+
     paths_file = open("backupPaths.txt", "r")
     paths = paths_file.readlines()
     paths_file.close()
@@ -46,6 +55,8 @@ def add_path(path):
 
 
 def remove_path(remove_path):
+    ensure_exists("backupPaths.txt")
+
     paths_file = open("backupPaths.txt", "r")
     paths = paths_file.readlines()
     paths_file.close()
@@ -61,6 +72,8 @@ def remove_path(remove_path):
 
 
 def list_paths():
+    ensure_exists("backupPaths.txt")
+
     backup_paths = open("backupPaths.txt", "r")
     print("Paths:\n")
     print(backup_paths.read())
@@ -69,11 +82,15 @@ def list_paths():
 
 
 def clear_paths():
+    ensure_exists("backupPaths.txt")
+
     backup_paths = open("backupPaths.txt", "w")
     backup_paths.close()
 
 
 def add_backup_location(location):
+    ensure_exists("backupLocations.txt")
+
     locations_file = open("backupLocations.txt", "r")
     locations = locations_file.readlines()
     locations_file.close()
@@ -101,6 +118,8 @@ def add_backup_location(location):
 
 
 def remove_backup_location(remove_location):
+    ensure_exists("backupLocations.txt")
+
     locations_file = open("backupLocations.txt", "r")
     locations = locations_file.readlines()
     locations_file.close()
@@ -116,6 +135,8 @@ def remove_backup_location(remove_location):
 
 
 def list_backup_locations():
+    ensure_exists("backupLocations.txt")
+
     locations = open("backupLocations.txt", "r")
     print("Locations:\n")
     print(locations.read())
@@ -124,5 +145,7 @@ def list_backup_locations():
 
 
 def clear_backup_locations():
+    ensure_exists("backupLocations.txt")
+
     backup_locations = open("backupLocations.txt", "w")
     backup_locations.close()
