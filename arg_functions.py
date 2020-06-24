@@ -54,7 +54,7 @@ def add_path(path):
         exit()
 
 
-def remove_path(remove_path):
+def remove_path(rpath):
     ensure_exists("backupPaths.txt")
 
     paths_file = open("backupPaths.txt", "r")
@@ -63,7 +63,7 @@ def remove_path(remove_path):
 
     paths_file = open("backupPaths.txt", "w")
     for path in paths:
-        if path.strip("\n") != remove_path:
+        if path.strip("\n") != rpath:
             paths_file.write(path)
     paths_file.close()
 
